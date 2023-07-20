@@ -23,7 +23,7 @@
 #include <SD.h>
 #include "string.h"
 
-#define SAMPLE_FREQ 20
+#define SAMPLE_FREQ 10
 #define CLK_FREQ 8000000
 #define TIMEOUT 10000
 #define cardSelect 4
@@ -48,6 +48,10 @@ union {float f; byte b[4];} a_x;
 union {float f; byte b[4];} a_y;
 union {float f; byte b[4];} a_z;
 
+// Time
+union {uint32_t i; byte b[4];} t_start;
+
+
 // Checksum
 union {unsigned short s; byte b[2];} checksum;
 
@@ -59,8 +63,9 @@ byte in[50];  // array to save data send from the IMU
 
 //private variables
 //private variables
-uint8_t debug = 1;
+uint8_t debug = 0;
 String msg = "";
+uint8_t sample = 0;
 
 File logfile;
 int count = 0;
@@ -70,7 +75,7 @@ void setInterrupt();
 void logMessage();
 void error(uint8_t errno);
 
-void read_imu_data(void);
+int read_imu_data(void);
 void check_sync_byte(void);
 unsigned short calculate_imu_crc(byte data[], unsigned int length);
 unsigned char calculateChecksum(unsigned char data[], unsigned int length);
@@ -88,7 +93,8 @@ ISR(TIMER1_COMPA_vect)
   //readData();
   if(count<10)
   {
-    run();
+    //run();
+    sample = 1;
     count++;
   }
 
@@ -136,31 +142,33 @@ void setup() {
 
   logMessage();
 
-  setInterrupt();
+  //setInterrupt();
 
 }
 
 
 void loop() 
 {
-  
+if(count<20)
+{
+  run();
+  count ++;
+}
+delay(20);
+
 }
 
 void run()
 {
 
   float time_now = millis();
-  float delta = 0;
   uint8_t timeout = 0;
-
-  //disable global interrupt while the routine runs
-  cli();
-
-  imu_sync_detected = false;
+  int ret = 0;
 
 
-  while(!imu_sync_detected && !timeout)
+  while(!timeout && !ret)
   {
+    imu_sync_detected = false;
     if((millis() - time_now) > TIMEOUT) timeout = 1;
     
     // Check if new IMU data is available
@@ -172,16 +180,16 @@ void run()
     // If sync byte is detected, read the rest of the data
     if (imu_sync_detected) 
     {
-      read_imu_data();
+      ret = 1;
+      ret = read_imu_data();     
     }
     delay(1);
   }
   if(timeout) Serial.print("Timeout");
   else logMessage();
 
+  sample = 0;
 
-  // enable global interrupt after message is saved
-  sei();
 
 }
 
@@ -255,19 +263,22 @@ void check_sync_byte(void) {
 
 
 // Read the IMU bytes
-void read_imu_data(void) {
+int read_imu_data(void) {
   int len = BIT_STRING_LENGTH - 1;
   Serial1.readBytes(in, len);
 
   checksum.b[0] = in[BIT_STRING_LENGTH - 2];
   checksum.b[1] = in[BIT_STRING_LENGTH - 3];
 
-
-  if ((calculate_imu_crc(in, BIT_STRING_LENGTH - 3) == checksum.s)) {
-    for (int i = 0; i < 4; i++) {
+  Serial.print("Haja");
+  if ((calculate_imu_crc(in, BIT_STRING_LENGTH - 3) == checksum.s)) 
+  {
+    for (int i = 0; i < 4; i++) 
+    {
       yaw.b[i] = in[3 + i];
       pitch.b[i] = in[7 + i];
       roll.b[i] = in[11 + i];
+      //t_start.b[i] = in[2+15 + i];
       //W_x.b[i] = in[15 + i];
       //W_y.b[i] = in[19 + i];
       //W_z.b[i] = in[23 + i];
@@ -276,10 +287,11 @@ void read_imu_data(void) {
       //a_z.b[i] = in[35 + i];
     }
     msg = String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
-    Serial.println(String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+    if(1)Serial.println(String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+    return 1;
     //Serial.println(String(W_x.f) + "," + String(W_y.f) + "," + String(W_z.f));
-    
   }
+  return 0;
 }
 
 

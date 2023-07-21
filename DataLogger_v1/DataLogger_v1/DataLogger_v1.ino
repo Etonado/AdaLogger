@@ -27,7 +27,12 @@
 #define CLK_FREQ 8000000
 #define TIMEOUT 10000
 #define cardSelect 4
-#define BIT_STRING_LENGTH 18
+#define BIT_STRING_LENGTH 28
+#define BIT_OFFSET 5 // for YPR = 3; for Time + YPR = 5 
+
+
+
+
 
 // Union functions for byte to float conversions
 // IMU sends data as bytes, the union functions are used to convert
@@ -49,7 +54,7 @@ union {float f; byte b[4];} a_y;
 union {float f; byte b[4];} a_z;
 
 // Time
-union {uint32_t i; byte b[4];} t_start;
+union {uint32_t lowPart; uint32_t highPart; byte b[8];} t_start;
 
 
 // Checksum
@@ -87,6 +92,34 @@ void logMsg();
 int readData();
 
 
+
+class MyUInt64 {
+public:
+  uint32_t lowPart;
+  uint32_t highPart;
+
+  MyUInt64() : lowPart(0), highPart(0) {}
+  MyUInt64(uint32_t low, uint32_t high) : lowPart(low), highPart(high) {}
+};
+
+uint32_t divideBy10e6(const MyUInt64& value) {
+  // 64-bit division by 1000
+  uint32_t remainder = 0;
+  uint32_t quotientLow = value.lowPart / 1000;
+  remainder = ((value.lowPart % 1000) << 22) | (value.highPart >> 10);
+  uint32_t quotientHigh = value.highPart / 1000;
+  remainder = (remainder << 22) | (value.highPart & 0x3FF);
+  quotientLow += remainder / 1000;
+  remainder %= 1000;
+
+  return quotientLow;
+}
+
+
+
+
+
+
 ISR(TIMER1_COMPA_vect)
 {
   TCNT1=0;            //reset timer
@@ -97,7 +130,6 @@ ISR(TIMER1_COMPA_vect)
     sample = 1;
     count++;
   }
-
 }
 
 
@@ -264,6 +296,9 @@ void check_sync_byte(void) {
 
 // Read the IMU bytes
 int read_imu_data(void) {
+
+  MyUInt64 data;
+
   int len = BIT_STRING_LENGTH - 1;
   Serial1.readBytes(in, len);
 
@@ -275,10 +310,10 @@ int read_imu_data(void) {
   {
     for (int i = 0; i < 4; i++) 
     {
-      yaw.b[i] = in[3 + i];
-      pitch.b[i] = in[7 + i];
-      roll.b[i] = in[11 + i];
-      //t_start.b[i] = in[2+15 + i];
+      yaw.b[i] = in[BIT_OFFSET + i];
+      pitch.b[i] = in[BIT_OFFSET + 4 + i];
+      roll.b[i] = in[BIT_OFFSET + 8 + i];
+      if(BIT_OFFSET == 5)t_start.b[i] = in[BIT_OFFSET + 12 + i];
       //W_x.b[i] = in[15 + i];
       //W_y.b[i] = in[19 + i];
       //W_z.b[i] = in[23 + i];
@@ -286,8 +321,13 @@ int read_imu_data(void) {
       //a_y.b[i] = in[31 + i];
       //a_z.b[i] = in[35 + i];
     }
+    MyUInt64 data(t_start.lowPart,t_start.highPart);
+    uint32_t time = divideBy10e6(data);
+
+
     msg = String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
-    if(1)Serial.println(String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+    if(BIT_OFFSET == 5)Serial.println(String(time) + "," + String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+    if(BIT_OFFSET == 3)Serial.println(String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
     return 1;
     //Serial.println(String(W_x.f) + "," + String(W_y.f) + "," + String(W_z.f));
   }

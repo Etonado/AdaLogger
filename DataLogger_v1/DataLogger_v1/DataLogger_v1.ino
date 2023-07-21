@@ -23,7 +23,7 @@
 #include <SD.h>
 #include "string.h"
 
-#define SAMPLE_FREQ 10
+#define SAMPLE_FREQ 20
 #define CLK_FREQ 8000000
 #define TIMEOUT 10000
 #define cardSelect 4
@@ -54,7 +54,9 @@ union {float f; byte b[4];} a_y;
 union {float f; byte b[4];} a_z;
 
 // Time
-union {uint32_t lowPart; uint32_t highPart; byte b[8];} t_start;
+union {uint32_t u32; byte b[4];} t_start_low;
+union {uint32_t u32; byte b[4];} t_start_high;
+
 
 
 // Checksum
@@ -90,35 +92,6 @@ void run();
 int setMessage();
 void logMsg();
 int readData();
-
-
-
-class MyUInt64 {
-public:
-  uint32_t lowPart;
-  uint32_t highPart;
-
-  MyUInt64() : lowPart(0), highPart(0) {}
-  MyUInt64(uint32_t low, uint32_t high) : lowPart(low), highPart(high) {}
-};
-
-uint32_t divideBy10e6(const MyUInt64& value) {
-  // 64-bit division by 1000
-  uint32_t remainder = 0;
-  uint32_t quotientLow = value.lowPart / 1000;
-  remainder = ((value.lowPart % 1000) << 22) | (value.highPart >> 10);
-  uint32_t quotientHigh = value.highPart / 1000;
-  remainder = (remainder << 22) | (value.highPart & 0x3FF);
-  quotientLow += remainder / 1000;
-  remainder %= 1000;
-
-  return quotientLow;
-}
-
-
-
-
-
 
 ISR(TIMER1_COMPA_vect)
 {
@@ -181,12 +154,12 @@ void setup() {
 
 void loop() 
 {
-if(count<20)
+if(count<100)
 {
   run();
   count ++;
 }
-delay(20);
+delay(1);
 
 }
 
@@ -200,6 +173,7 @@ void run()
 
   while(!timeout && !ret)
   {
+    Serial1.flush();
     imu_sync_detected = false;
     if((millis() - time_now) > TIMEOUT) timeout = 1;
     
@@ -224,7 +198,6 @@ void run()
 
 
 }
-
 
 void logMessage()
 {
@@ -297,8 +270,8 @@ void check_sync_byte(void) {
 // Read the IMU bytes
 int read_imu_data(void) {
 
-  MyUInt64 data;
-
+  static float time_prev = 0;
+  float time;
   int len = BIT_STRING_LENGTH - 1;
   Serial1.readBytes(in, len);
 
@@ -313,7 +286,9 @@ int read_imu_data(void) {
       yaw.b[i] = in[BIT_OFFSET + i];
       pitch.b[i] = in[BIT_OFFSET + 4 + i];
       roll.b[i] = in[BIT_OFFSET + 8 + i];
-      if(BIT_OFFSET == 5)t_start.b[i] = in[BIT_OFFSET + 12 + i];
+      if(BIT_OFFSET == 5)t_start_low.b[i] = in[BIT_OFFSET + 12 + i];
+      if(BIT_OFFSET == 5)t_start_high.b[i] = in[BIT_OFFSET + 16 + i];
+
       //W_x.b[i] = in[15 + i];
       //W_y.b[i] = in[19 + i];
       //W_z.b[i] = in[23 + i];
@@ -321,13 +296,16 @@ int read_imu_data(void) {
       //a_y.b[i] = in[31 + i];
       //a_z.b[i] = in[35 + i];
     }
-    MyUInt64 data(t_start.lowPart,t_start.highPart);
-    uint32_t time = divideBy10e6(data);
+    time = (t_start_high.u32*4294.967296 + t_start_low.u32/10e6);
 
 
-    msg = String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
-    if(BIT_OFFSET == 5)Serial.println(String(time) + "," + String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+    if(BIT_OFFSET == 3)msg = String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
+    if(BIT_OFFSET == 5)msg = String(time) + "," + String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
+    if(BIT_OFFSET == 5)Serial.println(String(time-time_prev));// + "," + String(t_start_high.u32) + "," +String(t_start_low.u32) + "," + String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
     if(BIT_OFFSET == 3)Serial.println(String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f));
+
+    time_prev = time;
+
     return 1;
     //Serial.println(String(W_x.f) + "," + String(W_y.f) + "," + String(W_z.f));
   }

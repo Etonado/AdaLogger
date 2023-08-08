@@ -23,15 +23,12 @@
 #include <SD.h>
 #include "string.h"
 
-#define SAMPLE_FREQ 20
+#define SAMPLE_FREQ 25
 #define CLK_FREQ 8000000
 #define TIMEOUT 10000
 #define cardSelect 4
 #define BIT_STRING_LENGTH 28
 #define BIT_OFFSET 5 // for YPR = 3; for Time + YPR = 5 
-
-
-
 
 
 // Union functions for byte to float conversions
@@ -57,16 +54,12 @@ union {float f; byte b[4];} a_z;
 union {uint32_t u32; byte b[4];} t_start_low;
 union {uint32_t u32; byte b[4];} t_start_high;
 
-
-
 // Checksum
 union {unsigned short s; byte b[2];} checksum;
-
 
 // Parameters
 bool imu_sync_detected = false;  // check if the sync byte (0xFA) is detected
 byte in[50];  // array to save data send from the IMU
-
 
 //private variables
 //private variables
@@ -97,9 +90,8 @@ ISR(TIMER1_COMPA_vect)
 {
   TCNT1=0;            //reset timer
   //readData();
-  if(count<10)
+  if(count<100)
   {
-    //run();
     sample = 1;
     count++;
   }
@@ -147,19 +139,18 @@ void setup() {
 
   logMessage();
 
-  //setInterrupt();
+  setInterrupt();
 
 }
 
 
 void loop() 
 {
-if(count<100)
+if(sample)
 {
   run();
-  count ++;
+  sample = 0;
 }
-delay(1);
 
 }
 
@@ -169,11 +160,9 @@ void run()
   float time_now = millis();
   uint8_t timeout = 0;
   int ret = 0;
-
-
+  
   while(!timeout && !ret)
   {
-    Serial1.flush();
     imu_sync_detected = false;
     if((millis() - time_now) > TIMEOUT) timeout = 1;
     
@@ -186,26 +175,18 @@ void run()
     // If sync byte is detected, read the rest of the data
     if (imu_sync_detected) 
     {
-      ret = 1;
       ret = read_imu_data();     
     }
     delay(1);
   }
   if(timeout) Serial.print("Timeout");
   else logMessage();
-
-  sample = 0;
-
-
 }
 
 void logMessage()
 {
   digitalWrite(8, HIGH);
   File logfile = SD.open(filename, FILE_WRITE);
-  
-  logfile.print(millis(),3);
-  logfile.print(",");
   if(debug)Serial.print(msg);
   logfile.println(msg);
   logfile.close();
@@ -278,7 +259,7 @@ int read_imu_data(void) {
   checksum.b[0] = in[BIT_STRING_LENGTH - 2];
   checksum.b[1] = in[BIT_STRING_LENGTH - 3];
 
-  Serial.print("Haja");
+  Serial.print("Reading...");
   if ((calculate_imu_crc(in, BIT_STRING_LENGTH - 3) == checksum.s)) 
   {
     for (int i = 0; i < 4; i++) 
@@ -296,7 +277,7 @@ int read_imu_data(void) {
       //a_y.b[i] = in[31 + i];
       //a_z.b[i] = in[35 + i];
     }
-    time = (t_start_high.u32*4294.967296 + t_start_low.u32/10e6);
+    time = (t_start_high.u32*4294.967296 + t_start_low.u32/10e5);
 
 
     if(BIT_OFFSET == 3)msg = String(yaw.f) + "," + String(pitch.f) + "," + String(roll.f);
